@@ -1,6 +1,5 @@
-// go-text 是一个纯标准库实现的文本处理小工具。
+// go-text 是文本处理小工具。
 // 平时处理日志、代码、笔记时常要做的事：大小写转换、行去重、统计字数。
-// 只用 bufio 逐行读、strings 做转换、unicode/utf8 数字符，零依赖。
 package main
 
 import (
@@ -35,17 +34,30 @@ func readLines(path string) ([]string, error) {
 	return lines, r.Err()
 }
 
-// writeLines 把结果写回标准输出。
-func writeLines(lines []string) {
+// writeLines 把结果写回标准输出（outPath 非空时写到文件）。
+func writeLines(lines []string, outPath string) error {
+	if outPath != "" {
+		f, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w := bufio.NewWriter(f)
+		for _, l := range lines {
+			fmt.Fprintln(w, l)
+		}
+		return w.Flush()
+	}
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
 	for _, l := range lines {
 		fmt.Fprintln(w, l)
 	}
+	return nil
 }
 
-// cmdCase 大小写转换：go-text case <upper|lower|title> [文件]
-func cmdCase(args []string) {
+// cmdCase 大小写转换：go-text case <upper|lower|title> [文件] [-o 输出]
+func cmdCase(args []string, outPath string) {
 	if len(args) < 1 {
 		fmt.Println("用法: go-text case <upper|lower|title> [文件]")
 		return
@@ -73,11 +85,13 @@ func cmdCase(args []string) {
 			return
 		}
 	}
-	writeLines(lines)
+	if err := writeLines(lines, outPath); err != nil {
+		fmt.Println("写出失败:", err)
+	}
 }
 
-// cmdDedup 行去重（保留首次出现顺序）：go-text dedup [文件]
-func cmdDedup(args []string) {
+// cmdDedup 行去重（保留首次出现顺序）：go-text dedup [文件] [-o 输出]
+func cmdDedup(args []string, outPath string) {
 	path := ""
 	if len(args) >= 1 {
 		path = args[0]
@@ -97,7 +111,33 @@ func cmdDedup(args []string) {
 		out = append(out, l)
 	}
 	fmt.Printf("去重前 %d 行，去重后 %d 行\n", len(lines), len(out))
-	writeLines(out)
+	if err := writeLines(out, outPath); err != nil {
+		fmt.Println("写出失败:", err)
+	}
+}
+
+// cmdReplace 在每行中替换子串：go-text replace <旧> <新> [文件] [-o 输出]
+func cmdReplace(args []string, outPath string) {
+	if len(args) < 2 {
+		fmt.Println("用法: go-text replace <旧> <新> [文件]")
+		return
+	}
+	old, nw := args[0], args[1]
+	path := ""
+	if len(args) >= 3 {
+		path = args[2]
+	}
+	lines, err := readLines(path)
+	if err != nil {
+		fmt.Println("读取失败:", err)
+		return
+	}
+	for i, l := range lines {
+		lines[i] = strings.ReplaceAll(l, old, nw)
+	}
+	if err := writeLines(lines, outPath); err != nil {
+		fmt.Println("写出失败:", err)
+	}
 }
 
 // cmdStat 统计：行数/词数/字符数：go-text stat [文件]
@@ -137,8 +177,8 @@ func wordCount(text string) int {
 	return len(strings.Fields(text))
 }
 
-// cmdSort 排序行（可选去重）：go-text sort [-u] [文件]
-func cmdSort(args []string) {
+// cmdSort 排序行（可选去重）：go-text sort [-u] [文件] [-o 输出]
+func cmdSort(args []string, outPath string) {
 	uniq := false
 	rest := args
 	if len(args) > 0 && args[0] == "-u" {
@@ -164,19 +204,22 @@ func cmdSort(args []string) {
 		}
 		lines = out
 	}
-	writeLines(lines)
+	if err := writeLines(lines, outPath); err != nil {
+		fmt.Println("写出失败:", err)
+	}
 }
 
 func usage() {
 	fmt.Print(`go-text 文本处理工具
 
 用法:
-  go-text case  <upper|lower|title> [文件]   大小写/首字母大写
-  go-text dedup [文件]                        行去重（保持顺序）
-  go-text stat [文件]                        统计行/词/字符数
-  go-text sort  [-u] [文件]                   排序行，-u 同时去重
+  go-text case  <upper|lower|title> [文件] [-o 输出]   大小写/首字母大写
+  go-text dedup [文件] [-o 输出]                        行去重（保持顺序）
+  go-text stat  [文件]                                  统计行/词/字符数
+  go-text sort  [-u] [文件] [-o 输出]                   排序行，-u 同时去重
+  go-text replace <旧> <新> [文件] [-o 输出]            逐行替换子串
 
-文件可省，省略时从标准输入读（支持管道）
+文件可省，省略时从标准输入读（支持管道）；-o 指定输出文件
 `)
 }
 
@@ -185,15 +228,27 @@ func main() {
 		usage()
 		return
 	}
+	// 通用 -o 输出参数
+	outPath := ""
+	restArgs := os.Args[2:]
+	for i := 0; i < len(restArgs); i++ {
+		if restArgs[i] == "-o" && i+1 < len(restArgs) {
+			outPath = restArgs[i+1]
+			restArgs = append(restArgs[:i], restArgs[i+2:]...)
+			i--
+		}
+	}
 	switch os.Args[1] {
 	case "case":
-		cmdCase(os.Args[2:])
+		cmdCase(restArgs, outPath)
 	case "dedup":
-		cmdDedup(os.Args[2:])
+		cmdDedup(restArgs, outPath)
 	case "stat":
-		cmdStat(os.Args[2:])
+		cmdStat(restArgs)
 	case "sort":
-		cmdSort(os.Args[2:])
+		cmdSort(restArgs, outPath)
+	case "replace":
+		cmdReplace(restArgs, outPath)
 	case "-h", "--help", "help":
 		usage()
 	default:
