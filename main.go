@@ -163,10 +163,6 @@ func cmdStat(args []string) {
 	if len(text) > 0 && !strings.HasSuffix(text, "\n") {
 		lines++ // 最后一行没有换行符也要算上
 	}
-	words := 0
-	for _, w := range strings.Fields(text) {
-		words += len(strings.Fields(w))
-	}
 	// utf8.RuneCountInString 才是正确的"字符数"，不是字节数。
 	chars := utf8.RuneCountInString(text)
 	fmt.Printf("行数: %d\n词数: %d\n字符数: %d\n", lines, wordCount(text), chars)
